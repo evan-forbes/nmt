@@ -119,6 +119,16 @@ func (n NamespacedMerkleTree) Prove(index int) (Proof, error) {
 	return NewInclusionProof(index, index+1, proof, isMaxNsIgnored), nil
 }
 
+func (n NamespacedMerkleTree) ProveRange(start, end int) (Proof, error) {
+	isMaxNsIgnored := n.treeHasher.IsMaxNamespaceIDIgnored()
+	subTreeHasher := internal.NewCachedSubtreeHasher(n.leafHashes, n.treeHasher)
+	proof, err := merkletree.BuildRangeProof(start, end, subTreeHasher)
+	if err != nil {
+		return NewEmptyRangeProof(isMaxNsIgnored), err
+	}
+	return NewInclusionProof(start, end, proof, isMaxNsIgnored), nil
+}
+
 // ProveNamespace returns a range proof for the given NamespaceID.
 //
 // In case the underlying tree contains leaves with the given namespace
