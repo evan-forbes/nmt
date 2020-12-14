@@ -3,6 +3,7 @@ package nmt
 import (
 	"bytes"
 	"crypto"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -598,4 +599,103 @@ func sum(hash crypto.Hash, data ...[]byte) []byte {
 	}
 
 	return h.Sum(nil)
+}
+
+// dump prevents the compiler from maker unrealistic comiler optimizations
+var dump = &NamespacedMerkleTree{}
+
+// BenchmarkNamespacedMerkleTree tests the time it takes to init a new NamespacedMerkle Tree
+func BenchmarkNamespacedMerkleTreeCreation(b *testing.B) {
+	for leaves := 32; leaves < 1025; leaves *= 2 {
+		randomData := make([]byte, 256)
+		_, err := rand.Read(randomData)
+		if err != nil {
+			panic(err)
+		}
+		leafData := generateUniformLeafData(leaves, namespace.ID(bytes.Repeat([]byte{0xFF}, 8)))
+		b.Run(
+			fmt.Sprintf("NMT with %d leaves", leaves),
+			func(b *testing.B) {
+				for n := 0; n < b.N; n++ {
+					tree := New(sha256.New(), InitialCapacity(leaves), NamespaceIDSize(8))
+					for _, l := range leafData {
+						err := tree.Push(l)
+						if err != nil {
+							b.Error(err)
+						}
+					}
+					dump = tree
+				}
+
+			},
+		)
+	}
+}
+
+// generateUniformLeafData creates a slice of length == count with a uniform namespace
+func generateUniformLeafData(count int, ns namespace.ID) []namespace.Data {
+	data := make([]namespace.Data, count)
+	for i := 0; i < count; i++ {
+		randomData := make([]byte, 256)
+		_, err := rand.Read(randomData)
+		if err != nil {
+			panic(err)
+		}
+		data[i] = namespace.PrefixedDataFrom(ns, randomData)
+	}
+	return data
+}
+
+var proofDump Proof
+
+func BenchmarkNameSpacedMerkleTreeProving(b *testing.B) {
+	// make proofs proving inclusing of a namespace consisting of a certain
+	for leaves := 128; leaves < 1025; leaves *= 2 {
+		tree, err := mockTreeWithNamespace(leaves, 2)
+		if err != nil {
+			b.Error(err)
+		}
+		nsID := namespace.ID(bytes.Repeat([]byte{0x1}, 8))
+		b.Run(
+			fmt.Sprintf("NMT with %d leaves", leaves),
+			func(b *testing.B) {
+				for n := 0; n < b.N; n++ {
+					p, err := tree.ProveNamespace(nsID)
+					if err != nil {
+						b.Error(err)
+					}
+					proofDump = p
+				}
+			},
+		)
+	}
+}
+
+// mockTreeWithNamespace creates a tree with a namespace that fills a provided
+// portion of the tree. Assumes nameSpaceChunkSize is smaller than leafCount
+func mockTreeWithNamespace(leafCount, nameSpaceChunkSize int) (*NamespacedMerkleTree, error) {
+	// create the tree
+	randomData := make([]byte, 256)
+	_, err := rand.Read(randomData)
+	if err != nil {
+		panic(err)
+	}
+	firstPortion := generateUniformLeafData(leafCount-nameSpaceChunkSize, namespace.ID(bytes.Repeat([]byte{0x0}, 8)))
+	middleNS := generateUniformLeafData(nameSpaceChunkSize, namespace.ID(bytes.Repeat([]byte{0x1}, 8)))
+	secondPortion := generateUniformLeafData(leafCount-nameSpaceChunkSize, namespace.ID(bytes.Repeat([]byte{0x2}, 8)))
+	leafData := append(
+		firstPortion,
+		append(
+			middleNS,
+			secondPortion...,
+		)...,
+	)
+	tree := New(sha256.New(), InitialCapacity(leafCount), NamespaceIDSize(8))
+	for _, l := range leafData {
+		err := tree.Push(l)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return tree, nil
 }
